@@ -1,24 +1,31 @@
 import { log } from '../lib/logger.js';
 
 const TABLE = 'source_records';
+const PAGE = 1000;   // Supabase の1回の読み取り上限
+const CHUNK = 500;   // 1回の書き込み件数
 
-/**
- * 差分を見て、必要な行だけ書き込む。
- *  - DBに無い          → INSERT（status は 'pending' で登録）
- *  - content_hash 変化 → UPDATE（status は既存のまま維持）
- *  - 変化なし          → 何もしない
- *  - 今回のデータに無い → status = 'inactive'（物理削除はしない）
- */
+/** 既存行を全件読む（1000件ずつページング） */
+async function fetchExisting(supabase, municipalityId, category) {
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select('id, source_record_id, content_hash, status')
+      .eq('municipality_id', municipalityId)
+      .eq('category', category)
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`Supabase読み取りエラー: ${error.message}`);
+    rows.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return rows;
+}
+
 export async function syncRecords(supabase, { municipalityId, category, records, dryRun = false }) {
-  const { data: existing, error } = await supabase
-    .from(TABLE)
-    .select('id, source_record_id, content_hash, status')
-    .eq('municipality_id', municipalityId)
-    .eq('category', category);
+  const existing = await fetchExisting(supabase, municipalityId, category);
+  log.info(`既存行: ${existing.length} 件`);
 
-  if (error) throw new Error(`Supabase読み取りエラー: ${error.message}`);
-
-  const existingMap = new Map((existing || []).map((r) => [r.source_record_id, r]));
+  const existingMap = new Map(existing.map((r) => [r.source_record_id, r]));
   const now = new Date().toISOString();
 
   const toInsert = [];
@@ -36,28 +43,33 @@ export async function syncRecords(supabase, { municipalityId, category, records,
     }
   }
 
-  // 今回の取得結果に含まれない既存行 → inactive（すでに inactive のものは触らない）
   const incomingIds = new Set(records.map((r) => r.source_record_id));
-  const toInactivate = (existing || []).filter((r) => !incomingIds.has(r.source_record_id) && r.status !== 'inactive');
+  const toInactivate = existing.filter((r) => !incomingIds.has(r.source_record_id) && r.status !== 'inactive');
 
   if (dryRun) {
     log.warn('dry-run のため書き込みはしません');
   } else {
-    if (toInsert.length) {
-      const { error: e } = await supabase.from(TABLE).insert(toInsert);
-      if (e) throw new Error(`Supabase書き込みエラー(INSERT): ${e.message}`);
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      const chunk = toInsert.slice(i, i + CHUNK);
+      const { error } = await supabase
+        .from(TABLE)
+        .upsert(chunk, { onConflict: 'municipality_id,category,source_record_id', ignoreDuplicates: true });
+      if (error) throw new Error(`Supabase書き込みエラー(UPSERT): ${error.message}`);
     }
     for (const row of toUpdate) {
       const { id, ...rest } = row;
-      const { error: e } = await supabase.from(TABLE).update(rest).eq('id', id);
-      if (e) throw new Error(`Supabase書き込みエラー(UPDATE id=${id}): ${e.message}`);
+      const { error } = await supabase.from(TABLE).update(rest).eq('id', id);
+      if (error) throw new Error(`Supabase書き込みエラー(UPDATE id=${id}): ${error.message}`);
     }
     if (toInactivate.length) {
-      const { error: e } = await supabase
-        .from(TABLE)
-        .update({ status: 'inactive', fetched_at: now })
-        .in('id', toInactivate.map((r) => r.id));
-      if (e) throw new Error(`Supabase書き込みエラー(inactive): ${e.message}`);
+      const ids = toInactivate.map((r) => r.id);
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const { error } = await supabase
+          .from(TABLE)
+          .update({ status: 'inactive', fetched_at: now })
+          .in('id', ids.slice(i, i + CHUNK));
+        if (error) throw new Error(`Supabase書き込みエラー(inactive): ${error.message}`);
+      }
     }
   }
 
