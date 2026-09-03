@@ -1,1 +1,39 @@
+name: Ingest Yamato garbage data
 
+on:
+  schedule:
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true なら Supabase へ書き込まず件数だけ確認'
+        type: boolean
+        default: true
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: scripts
+        run: npm install --no-audit --no-fund
+
+      - name: Run ingest
+        working-directory: scripts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SOURCE_URL_YAMATO_KANAGAWA_GARBAGE: ${{ secrets.SOURCE_URL_YAMATO_KANAGAWA_GARBAGE }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            node ingest.js --municipality=yamato_kanagawa --dataset=garbage --dry-run
+          else
+            node ingest.js --municipality=yamato_kanagawa --dataset=garbage
+          fi
