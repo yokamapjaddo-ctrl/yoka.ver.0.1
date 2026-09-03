@@ -9,12 +9,14 @@ import { createHash } from 'node:crypto';
  *   FIELD_CANDIDATES に1つだけ残す形で書き換えてください。
  */
 const FIELD_CANDIDATES = {
-  recordId: ['id', 'ID', 'No', 'no', '番号', '整理番号'],
-  itemName: ['品目', '品目名', '名称', 'ごみの種類', 'item', 'name'],
-  disposalClass: ['区分', '分別区分', '出し方区分', '分類', 'category', 'class'],
-  note: ['備考', '注意事項', '出し方', 'remarks', 'note'],
-  yomi: ['よみ', '読み', 'ふりがな', 'kana'],
-  updatedAt: ['更新日', '更新日時', 'updated_at', 'last_modified'],
+  recordId: [],
+  itemName: ['品名'],
+  disposalClass: ['分類'],
+  note: ['出し方のポイント'],
+  yomi: ['読み'],
+  initial: ['品名頭文字'],
+  similar: ['類似語'],
+  updatedAt: [],
 };
 
 const pick = (row, keys) => {
@@ -38,14 +40,16 @@ export function transform(rows, ctx) {
       return;
     }
 
-    const payload = {
-      dataset: 'garbage_items',        // 分別一覧であることの目印
+     const payload = {
+      dataset: 'garbage_items',
       item_name: itemName,
-      disposal_class: disposalClass,   // 燃やせるごみ / 燃やせないごみ / 資源A など
+      disposal_class: disposalClass,
       yomi: pick(raw, FIELD_CANDIDATES.yomi),
+      initial: pick(raw, FIELD_CANDIDATES.initial),
+      similar_words: pick(raw, FIELD_CANDIDATES.similar),
       note: pick(raw, FIELD_CANDIDATES.note),
     };
-
+    
     records.push({
       municipality_id: ctx.municipality.id,
       category: ctx.category,
