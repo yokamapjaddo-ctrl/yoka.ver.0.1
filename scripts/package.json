@@ -1,0 +1,16 @@
+{
+  "name": "yoka-ingest",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "自治体オープンデータ → Supabase 取り込みスクリプト（GitHub Actions から実行）",
+  "scripts": {
+    "ingest": "node ingest.js",
+    "ingest:garbage": "node ingest.js --municipality=yamato_kanagawa --dataset=garbage",
+    "ingest:dry": "node ingest.js --municipality=yamato_kanagawa --dataset=garbage --dry-run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "csv-parse": "^5.5.6"
+  }
+}
