@@ -1,0 +1,47 @@
+name: Ingest Fujisawa open data
+
+on:
+  schedule:
+    - cron: '20,50 * * * *'
+    - cron: '10 20 * * *'
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: '取り込むデータ種別'
+        type: choice
+        options: [disaster, shelters, both]
+        default: both
+      dry_run:
+        description: 'true にすると Supabase へ書き込まず件数だけ確認します'
+        type: boolean
+        default: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SOURCE_URL_FUJISAWA_KANAGAWA_DISASTER: ${{ secrets.SOURCE_URL_FUJISAWA_KANAGAWA_DISASTER }}
+      SOURCE_URL_FUJISAWA_KANAGAWA_SHELTERS: ${{ secrets.SOURCE_URL_FUJISAWA_KANAGAWA_SHELTERS }}
+      DRY: ${{ inputs.dry_run && '--dry-run' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: scripts
+        run: npm install --no-audit --no-fund
+
+      - name: Ingest disaster feed
+        if: github.event_name == 'schedule' && github.event.schedule != '10 20 * * *' || contains(fromJSON('["disaster","both"]'), inputs.dataset)
+        working-directory: scripts
+        run: node ingest.js --municipality=fujisawa_kanagawa --dataset=disaster $DRY
+
+      - name: Ingest shelters
+        if: github.event.schedule == '10 20 * * *' || contains(fromJSON('["shelters","both"]'), inputs.dataset)
+        working-directory: scripts
+        run: node ingest.js --municipality=fujisawa_kanagawa --dataset=shelters $DRY
